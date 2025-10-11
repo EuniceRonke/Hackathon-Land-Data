@@ -8,3 +8,6 @@ __pycache__/
 
 # Ignore virtual environment
 venv/
+
+# Ignore environment folder
+.streamlit
