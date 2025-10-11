@@ -57,22 +57,31 @@ streamlit run app.py
 
 🔑 Environment Variables
 
-Create a .env file in your root folder and add:
+Create a .env file in your root folder 
 
 SUPABASE_URL=your_supabase_project_url
+
 SUPABASE_KEY=your_supabase_service_key
 
 
 🗺️ Database Structure (Supabase)
 Column	Type	Description
 id	int	Primary key
+
 location	text	Plot name (e.g., Plot A, Plot B)
+
 latitude	decimal	GPS latitude (°)
+
 longitude	decimal	GPS longitude (°)
+
 soil_moisture	float	Moisture level (%)
+
 vegetation_index	float	NDVI (0–1)
+
 temperature	float	Temperature in °C
+
 timestamp	timestamps	Time of data capture
+
 
 🧭 Future Enhancements
 
