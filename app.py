@@ -1,154 +1,168 @@
 import streamlit as st
-from supabase import create_client, Client
 import pandas as pd
-import pydeck as pdk
-from datetime import datetime
-from dotenv import load_dotenv
+import folium
+from streamlit_folium import st_folium
+from supabase import create_client, Client
 from geopy.geocoders import Nominatim
-import os
 
-# --- Load Environment Variables ---
-load_dotenv()
-
-# --- Streamlit Page Setup ---
-st.set_page_config(page_title="TerraScope", layout="wide")
-
-# --- Connect to Supabase ---
+# --------------------------
+# Load Supabase credentials
+# --------------------------
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.title("🌍 TerraScope – AI Land Health Monitor")
+# --------------------------
+# Page Setup
+# --------------------------
+st.set_page_config(page_title="TerraScope - Land Health Monitor", layout="wide")
+st.title("🌍 TerraScope - Land Health Monitoring Dashboard")
 
-# --- Function to Fetch Data ---
-@st.cache_data(ttl=60)
-def load_data():
-    response = supabase.table("land_data").select("*").execute()
-    return pd.DataFrame(response.data)
-
-# --- Fetch Data ---
+# --------------------------
+# Fetch Data
+# --------------------------
 try:
-    df = load_data()
-    if df.empty:
-        st.warning("No data found in Supabase table.")
+    response = supabase.table("land_data").select("*").execute()
+    data = pd.DataFrame(response.data)
+
+    if data.empty:
+        st.warning("No land data found in Supabase.")
     else:
-        st.success("✅ Successfully fetched data from Supabase!")
+        st.success("✅ Data fetched successfully from Supabase.")
 except Exception as e:
     st.error(f"❌ Failed to fetch data: {e}")
-    st.stop()
+    data = pd.DataFrame()
 
-# --- Sidebar Form ---
-st.sidebar.header("➕ Add New Land Data")
-geolocator = Nominatim(user_agent="terrascope_app")
+# --------------------------
+# Function to classify health
+# --------------------------
+def classify_land(vegetation_index, soil_moisture, temperature):
+    if vegetation_index < 0.3 or soil_moisture < 20 or temperature > 35:
+        return "Degraded"
+    elif vegetation_index < 0.5 or soil_moisture < 35:
+        return "At Risk"
+    else:
+        return "Healthy"
 
-with st.sidebar.form("data_entry_form"):
+# --------------------------
+# Suggestion logic
+# --------------------------
+def get_suggestion(status):
+    if status == "Degraded":
+        return "Recommend: Reforestation or irrigation to restore soil health."
+    elif status == "At Risk":
+        return "Recommend: Mulching, cover crops, or moderate irrigation."
+    else:
+        return "Land is healthy. Maintain current practices."
+
+# --------------------------
+# Show map + alert if data exists
+# --------------------------
+if not data.empty:
+    # Ensure numeric data
+    data["latitude"] = pd.to_numeric(data["latitude"], errors="coerce")
+    data["longitude"] = pd.to_numeric(data["longitude"], errors="coerce")
+
+    # Add classification and suggestion
+    data["status"] = data.apply(
+        lambda row: classify_land(row["vegetation_index"], row["soil_moisture"], row["temperature"]),
+        axis=1
+    )
+    data["suggestion"] = data["status"].apply(get_suggestion)
+
+    # Define color
+    def get_color(status):
+        if status == "Degraded":
+            return "red"
+        elif status == "At Risk":
+            return "orange"
+        else:
+            return "green"
+
+    # Create Map (Centered on Africa)
+    m = folium.Map(location=[9.0820, 8.6753], zoom_start=5, tiles="cartodb positron")
+
+    # Add points
+    for _, row in data.iterrows():
+        if pd.notnull(row["latitude"]) and pd.notnull(row["longitude"]):
+            folium.CircleMarker(
+                location=[row["latitude"], row["longitude"]],
+                radius=8,
+                color=get_color(row["status"]),
+                fill=True,
+                fill_color=get_color(row["status"]),
+                fill_opacity=0.8,
+                popup=folium.Popup(
+                    f"<b>Location:</b> {row['location']}<br>"
+                    f"<b>Status:</b> {row['status']}<br>"
+                    f"<b>Suggestion:</b> {row['suggestion']}",
+                    max_width=250,
+                ),
+            ).add_to(m)
+
+    # Add legend manually
+    legend_html = """
+    <div style="position: fixed; 
+                bottom: 30px; left: 30px; width: 160px; height: 110px; 
+                background-color: white; z-index:9999; font-size:14px;
+                border:2px solid grey; border-radius:8px; padding: 10px;">
+        <b>Legend:</b><br>
+        <i style="background:green; width:10px; height:10px; border-radius:50%; display:inline-block;"></i> Healthy<br>
+        <i style="background:orange; width:10px; height:10px; border-radius:50%; display:inline-block;"></i> At Risk<br>
+        <i style="background:red; width:10px; height:10px; border-radius:50%; display:inline-block;"></i> Degraded
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+    st.subheader("🗺️ Land Health Map")
+    st_folium(m, width=900, height=500)
+
+    # Show data table
+    st.subheader("📋 Land Data Table")
+    st.dataframe(data[["location", "latitude", "longitude", "soil_moisture",
+                       "vegetation_index", "temperature", "status", "suggestion", "timestamp"]])
+
+# --------------------------
+# Data Input Form
+# --------------------------
+st.markdown("---")
+st.subheader("🧩 Add New Land Data")
+
+with st.form("land_form"):
     latitude = st.number_input("Latitude", format="%.6f")
     longitude = st.number_input("Longitude", format="%.6f")
 
-    # Auto-fill location name
-    location = ""
+    geolocator = Nominatim(user_agent="terrascope")
+    location_name = ""
     if latitude and longitude:
         try:
-            loc = geolocator.reverse(f"{latitude}, {longitude}", language="en")
-            if loc and "address" in loc.raw:
-                location = loc.address.split(",")[0]
+            location_name = geolocator.reverse((latitude, longitude), timeout=10).address
         except:
-            location = "Unknown"
+            location_name = "Unknown Location"
 
-    location_input = st.text_input("Location", value=location)
-    soil_moisture = st.number_input("Soil Moisture (%)", min_value=0.0)
-    vegetation_index = st.number_input("Vegetation Index (0-1)", min_value=0.0, max_value=1.0)
-    temperature = st.number_input("Temperature (°C)", min_value=-10.0, max_value=60.0)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+    vegetation_index = st.slider("Vegetation Index", 0.0, 1.0, 0.5)
+    soil_moisture = st.number_input("Soil Moisture (%)", 0, 100, 40)
+    temperature = st.number_input("Temperature (°C)", 0, 60, 28)
     submit = st.form_submit_button("Submit Data")
 
-# --- Insert into Supabase ---
-if submit:
-    try:
-        data = {
-            "location": location_input,
+    if submit:
+        status = classify_land(vegetation_index, soil_moisture, temperature)
+        suggestion = get_suggestion(status)
+
+        insert_data = {
+            "location": location_name,
             "latitude": latitude,
             "longitude": longitude,
             "soil_moisture": soil_moisture,
             "vegetation_index": vegetation_index,
             "temperature": temperature,
-            "timestamp": timestamp,
+            "status": status,
+            "suggestion": suggestion,
         }
-        supabase.table("land_data").insert(data).execute()
-        st.success("✅ Data added successfully! Refreshing map...")
-        st.cache_data.clear()
-        st.rerun()
-    except Exception as e:
-        st.error(f"❌ Failed to insert data: {e}")
 
-# --- Data Validation ---
-if not df.empty:
-    # Determine status
-    df["status"] = df.apply(
-        lambda row: "Degraded" if (row["soil_moisture"] < 30 or row["temperature"] > 35 or row["vegetation_index"] < 0.3)
-        else ("At Risk" if (30 <= row["soil_moisture"] < 40 or 33 <= row["temperature"] <= 35 or 0.3 <= row["vegetation_index"] < 0.4)
-              else "Healthy"),
-        axis=1
-    )
-
-    # Assign colors
-    color_map = {
-        "Healthy": [0, 255, 0],     # Green
-        "At Risk": [255, 165, 0],   # Orange
-        "Degraded": [255, 0, 0],    # Red
-    }
-    df["color"] = df["status"].map(color_map)
-
-    # --- Africa Map ---
-    st.subheader("🗺️ Land Health Overview (Africa)")
-    view_state = pdk.ViewState(latitude=0.5, longitude=20.0, zoom=3.5, pitch=0)
-
-    layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=df,
-        get_position=["longitude", "latitude"],
-        get_fill_color="color",
-        get_radius=40000,
-        pickable=True,
-    )
-
-    tooltip = {
-        "html": "<b>Location:</b> {location}<br/>"
-                "<b>Status:</b> {status}<br/>"
-                "<b>Soil Moisture:</b> {soil_moisture}<br/>"
-                "<b>Temperature:</b> {temperature}<br/>"
-                "<b>Vegetation Index:</b> {vegetation_index}<br/>"
-                "<b>Timestamp:</b> {timestamp}",
-        "style": {"backgroundColor": "white", "color": "black"}
-    }
-
-    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip=tooltip))
-
-    # --- Legend (Fixed Display) ---
-    st.markdown("""
-    <div style="display:flex; justify-content:center; gap:30px; font-size:16px; margin-top:10px;">
-        <div style="display:flex; align-items:center; gap:8px;">
-            <div style="width:18px; height:18px; border-radius:50%; background:red;"></div> Degraded
-        </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-            <div style="width:18px; height:18px; border-radius:50%; background:orange;"></div> At Risk
-        </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-            <div style="width:18px; height:18px; border-radius:50%; background:green;"></div> Healthy
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # --- Alerts Section ---
-    st.subheader("⚠️ Alerts & Recommendations")
-    degraded = df[df["status"] == "Degraded"]
-    if not degraded.empty:
-        for _, row in degraded.iterrows():
-            st.error(f"🚨 {row['location']} - Degraded: Low soil moisture or high temperature detected!")
-    else:
-        st.success("✅ All monitored lands are stable.")
-
-    # --- Data Table (Hide Color Column) ---
-    st.subheader("📊 Land Data Table")
-    st.dataframe(df.drop(columns=["color"]))
+        try:
+            supabase.table("land_data").insert(insert_data).execute()
+            st.success("✅ Data successfully added!")
+        except Exception as e:
+            st.error(f"❌ Failed to add data: {e}")
