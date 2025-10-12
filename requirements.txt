@@ -1,6 +1,9 @@
 streamlit
-supabase
+
 python-dotenv
+supabase
+geopy
 pandas
-pydeck
 numpy
+pydeck
+requests
