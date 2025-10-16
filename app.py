@@ -166,3 +166,19 @@ with st.form("land_form"):
             st.success("✅ Data successfully added!")
         except Exception as e:
             st.error(f"❌ Failed to add data: {e}")
+
+# --- Footer ---
+st.markdown("---")
+st.markdown(
+    """
+    <div style='text-align: center;'>
+        <img src="https://app.greenweb.org/api/v3/greencheckimage/terrascope.streamlit.app?nocache=true"
+             alt="This website runs on green hosting - verified by thegreenwebfoundation.org"
+             width="200px" height="95px">
+        <p style='font-size: 14px; color: gray;'>
+            This website runs on green hosting — verified by thegreenwebfoundation.org
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
